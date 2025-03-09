@@ -1,7 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 void main() {
   runApp(const MyApp());
@@ -10,27 +12,11 @@ void main() {
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Flutter Demo',
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
@@ -51,17 +37,29 @@ class MapSampleState extends State<MapSample> {
 
   String mapStyle = "";
   Set<Marker> markers = {};
+  StreamSubscription<Position>? _positionStream;
+  bool _isPermissionGranted = false;
+  LatLng? _currentLocation;
 
   @override
   void initState() {
     _loadMapStyle();
+    _checkPermissionRequest();
     super.initState();
+  }
+
+  @override
+  void dispose() {
+    _positionStream?.cancel();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: GoogleMap(
+        myLocationButtonEnabled: true,
+        myLocationEnabled: _isPermissionGranted,
         style: mapStyle,
         initialCameraPosition: const CameraPosition(
           target: LatLng(31.232051829912297, 29.958269615227238),
@@ -97,21 +95,6 @@ class MapSampleState extends State<MapSample> {
         },
         markers: markers,
       ),
-      floatingActionButton: FloatingActionButton(onPressed: () {
-        _moveToCairo();
-      }),
-    );
-  }
-
-  void _moveToCairo() async {
-    final GoogleMapController controller = await _controller.future;
-    controller.animateCamera(
-      CameraUpdate.newCameraPosition(
-        const CameraPosition(
-          target: LatLng(30.032147643718574, 31.463156048547326),
-          zoom: 12,
-        ),
-      ),
     );
   }
 
@@ -124,5 +107,62 @@ class MapSampleState extends State<MapSample> {
 
   Future<BitmapDescriptor> _customIcon(String assets) async {
     return await BitmapDescriptor.asset(const ImageConfiguration(size: Size(48, 48)), assets);
+  }
+
+  _checkPermissionRequest() async {
+    PermissionStatus status = await Permission.location.request();
+    if (status.isGranted) {
+      setState(() {
+        _isPermissionGranted = true;
+      });
+      _getUserLocation();
+    } else {
+      // show Dialog
+    }
+  }
+
+  void _getUserLocation() async {
+    if (!_isPermissionGranted) {
+      return;
+    }
+
+    Position position = await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+    );
+
+    setState(() {
+      _currentLocation = LatLng(position.latitude, position.longitude);
+    });
+    final GoogleMapController controller = await _controller.future;
+    controller.animateCamera(
+      CameraUpdate.newCameraPosition(
+        CameraPosition(
+          target: _currentLocation ?? const LatLng(30.032147643718574, 31.463156048547326),
+          zoom: 14,
+        ),
+      ),
+    );
+    _startTracking();
+  }
+
+  void _startTracking() async {
+    _positionStream =
+        Geolocator.getPositionStream(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high))
+            .listen((Position position) {
+      setState(() {
+        _currentLocation = LatLng(position.latitude, position.longitude);
+      });
+
+      _controller.future.then((controller) {
+        controller.animateCamera(
+          CameraUpdate.newCameraPosition(
+            CameraPosition(
+              target: _currentLocation ?? const LatLng(30.032147643718574, 31.463156048547326),
+              zoom: 14,
+            ),
+          ),
+        );
+      });
+    });
   }
 }
